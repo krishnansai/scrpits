@@ -1,0 +1,79 @@
+stages:
+  - validate
+  - plan
+  - apply
+  - destroy
+
+before_script:
+  - chmod +x terraform_deploy.sh
+
+variables:
+  ENVIRONMENT:
+    value: ${CI_COMMIT_REF_NAME}
+    description: "The environment derived from the branch name"
+
+validate:
+  stage: validate
+  script:
+    - |
+      case "$CI_COMMIT_REF_NAME" in
+        dev|test|prod)
+          ./terraform_deploy.sh $CI_COMMIT_REF_NAME validate app1 ${CI_COMMIT_REF_NAME} ${CI_COMMIT_REF_NAME}
+          ;;
+        *)
+          echo "Branch name must be one of: dev, test, prod"
+          exit 1
+          ;;
+      esac
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^dev|test|prod$/'
+
+plan:
+  stage: plan
+  script:
+    - |
+      case "$CI_COMMIT_REF_NAME" in
+        dev|test|prod)
+          ./terraform_deploy.sh $CI_COMMIT_REF_NAME plan app1 ${CI_COMMIT_REF_NAME} ${CI_COMMIT_REF_NAME}
+          ;;
+        *)
+          echo "Branch name must be one of: dev, test, prod"
+          exit 1
+          ;;
+      esac
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^dev|test|prod$/'
+
+apply:
+  stage: apply
+  script:
+    - |
+      case "$CI_COMMIT_REF_NAME" in
+        dev|test|prod)
+          ./terraform_deploy.sh $CI_COMMIT_REF_NAME apply app1 ${CI_COMMIT_REF_NAME} ${CI_COMMIT_REF_NAME}
+          ;;
+        *)
+          echo "Branch name must be one of: dev, test, prod"
+          exit 1
+          ;;
+      esac
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^dev|test|prod$/'
+
+destroy:
+  stage: destroy
+  script:
+    - |
+      case "$CI_COMMIT_REF_NAME" in
+        dev|test|prod)
+          ./terraform_deploy.sh $CI_COMMIT_REF_NAME destroy app1 ${CI_COMMIT_REF_NAME} ${CI_COMMIT_REF_NAME}
+          ;;
+        *)
+          echo "Branch name must be one of: dev, test, prod"
+          exit 1
+          ;;
+      esac
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^dev|test|prod$/'
