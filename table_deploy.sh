@@ -1,48 +1,51 @@
 #!/usr/bin/env bash
 
-# Table formatting parameters
-SEP="+----------------------+--------------------------------+---------------------------+----------+----------+----------+----------+----------+"
-HEADER="| NAMESPACE            | DEPLOYMENT                     | INGRESS                   | CPU      | MEMORY   | HEAP     | XMX      | XMS      |"
+# Table headers
+SEP="+----------------------+--------------------------------+---------------------------+--------------------------------------------+----------+----------+----------+----------+"
+HEADER="| NAMESPACE            | POD                            | INGRESS                   | ENDPOINT                                   | CPU      | MEMORY   | XMS      | XMX      |"
 
-# Print header
 echo "$SEP"
 echo "$HEADER"
 echo "$SEP"
 
+# Loop through namespaces
 for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
-  deploys=$(kubectl get deploy -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
-  ing=$(kubectl get ing -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null)
-  if [[ -z "$ing" ]]; then
-    ing="(none)"
+  # Get all pods in namespace
+  pods=$(kubectl get pods -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+  # Take the first pod only
+  pod=$(echo "$pods" | head -n1)
+  if [[ -z "$pod" ]]; then
+    continue
   fi
 
-  for deploy in $deploys; do
-    kubectl get deploy "$deploy" -n "$ns" -o json | jq -r --arg ns "$ns" --arg deploy "$deploy" --arg ing "$ing" '
-      .spec.template.spec.containers[] | [
-        $ns,
-        $deploy,
-        $ing,
-        (.resources.requests.cpu // "NA"),
-        (.resources.requests.memory // "NA"),
-        (
-          if .env then
-            (.env[] | select(.name=="JAVA_OPTS").value // "")
-          else ""
-          end
-        )
-      ] | @tsv' | while IFS=$'\t' read -r namespace deploy ing cpu memory java_opts; do
-        heap="NA"
-        xmx="NA"
-        xms="NA"
-        if [[ -n "$java_opts" ]]; then
-          [[ "$java_opts" =~ (-Xmx[^[:space:]]+) ]] && xmx="${BASH_REMATCH[1]}"
-          [[ "$java_opts" =~ (-Xms[^[:space:]]+) ]] && xms="${BASH_REMATCH[1]}"
-          [[ "$java_opts" =~ (-X[Hh]eap[^[:space:]]+) ]] && heap="${BASH_REMATCH[1]}"
-        fi
+  # Get CPU and Memory Requests from the pod spec
+  cpu=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[0].resources.requests.cpu}')
+  memory=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[0].resources.requests.memory}')
+  [[ -z "$cpu" ]] && cpu="NA"
+  [[ -z "$memory" ]] && memory="NA"
 
-        printf "| %-20s | %-30s | %-25s | %-8s | %-8s | %-8s | %-8s | %-8s |\n" \
-          "$namespace" "$deploy" "$ing" "$cpu" "$memory" "$heap" "$xmx" "$xms"
-        echo "$SEP"
-    done
-  done
+  # Get JVM flags from the running java process
+  java_args=$(kubectl exec -n "$ns" "$pod" -- ps -o args= -C java 2>/dev/null)
+  if [[ -z "$java_args" ]]; then
+    java_args=$(kubectl exec -n "$ns" "$pod" -- ps -ef | grep '[j]ava' | awk '{$1=$2=$3=$4=$5=""; print $0}')
+  fi
+
+  xms="NA"
+  xmx="NA"
+  if [[ -n "$java_args" ]]; then
+    [[ "$java_args" =~ (-Xms[^[:space:]]+) ]] && xms="${BASH_REMATCH[1]}"
+    [[ "$java_args" =~ (-Xmx[^[:space:]]+) ]] && xmx="${BASH_REMATCH[1]}"
+  fi
+
+  # Get ingress name(s)
+  ing=$(kubectl get ingress -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null)
+  [[ -z "$ing" ]] && ing="(none)"
+
+  # Get ingress endpoint(s)
+  endpoint=$(kubectl get ingress -n "$ns" -o jsonpath='{range .items[*]}{.status.loadBalancer.ingress[*].hostname}{.status.loadBalancer.ingress[*].ip}{" "}{end}' 2>/dev/null)
+  [[ -z "$endpoint" ]] && endpoint="(none)"
+
+  printf "| %-20s | %-30s | %-25s | %-42s | %-8s | %-8s | %-8s | %-8s |\n" \
+    "$ns" "$pod" "$ing" "$endpoint" "$cpu" "$memory" "$xms" "$xmx"
+  echo "$SEP"
 done
