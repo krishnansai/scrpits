@@ -1,51 +1,68 @@
 #!/usr/bin/env bash
 
-# Table headers
 SEP="+----------------------+--------------------------------+---------------------------+--------------------------------------------+----------+----------+----------+----------+"
-HEADER="| NAMESPACE            | POD                            | INGRESS                   | ENDPOINT                                   | CPU      | MEMORY   | XMS      | XMX      |"
+HEADER="| NAMESPACE            | POD                            | INGRESS                   | ENDPOINT URL                               | CPU      | MEMORY   | XMS      | XMX      |"
 
 echo "$SEP"
 echo "$HEADER"
 echo "$SEP"
 
-# Loop through namespaces
+# Loop all namespaces
 for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
-  # Get all pods in namespace
   pods=$(kubectl get pods -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
-  # Take the first pod only
   pod=$(echo "$pods" | head -n1)
   if [[ -z "$pod" ]]; then
     continue
   fi
 
-  # Get CPU and Memory Requests from the pod spec
-  cpu=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[0].resources.requests.cpu}')
-  memory=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[0].resources.requests.memory}')
-  [[ -z "$cpu" ]] && cpu="NA"
-  [[ -z "$memory" ]] && memory="NA"
+  # CPU and Memory Requests
+  cpu=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[0].resources.requests.cpu}' 2>/dev/null)
+  memory=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.spec.containers[0].resources.requests.memory}' 2>/dev/null)
+  [[ -z "$cpu" ]] && cpu="N/A"
+  [[ -z "$memory" ]] && memory="N/A"
 
-  # Get JVM flags from the running java process
-  java_args=$(kubectl exec -n "$ns" "$pod" -- ps -o args= -C java 2>/dev/null)
+  # JVM flags
+  java_args=$(kubectl exec -n "$ns" "$pod" -- ps -o args= -C java 2>/dev/null || true)
   if [[ -z "$java_args" ]]; then
-    java_args=$(kubectl exec -n "$ns" "$pod" -- ps -ef | grep '[j]ava' | awk '{$1=$2=$3=$4=$5=""; print $0}')
+    java_args=$(kubectl exec -n "$ns" "$pod" -- ps -ef 2>/dev/null | grep '[j]ava' | awk '{$1=$2=$3=$4=$5=""; print $0}')
   fi
 
-  xms="NA"
-  xmx="NA"
+  xms="N/A"
+  xmx="N/A"
   if [[ -n "$java_args" ]]; then
     [[ "$java_args" =~ (-Xms[^[:space:]]+) ]] && xms="${BASH_REMATCH[1]}"
     [[ "$java_args" =~ (-Xmx[^[:space:]]+) ]] && xmx="${BASH_REMATCH[1]}"
   fi
 
-  # Get ingress name(s)
-  ing=$(kubectl get ingress -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null)
-  [[ -z "$ing" ]] && ing="(none)"
+  # Ingress names
+  ingress_names=$(kubectl get ingress -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null)
+  [[ -z "$ingress_names" ]] && ingress_names="(none)"
 
-  # Get ingress endpoint(s)
-  endpoint=$(kubectl get ingress -n "$ns" -o jsonpath='{range .items[*]}{.status.loadBalancer.ingress[*].hostname}{.status.loadBalancer.ingress[*].ip}{" "}{end}' 2>/dev/null)
-  [[ -z "$endpoint" ]] && endpoint="(none)"
+  # Build URLs
+  urls="N/A"
+  for ing_name in $ingress_names; do
+    if [[ "$ing_name" == "(none)" ]]; then
+      continue
+    fi
+    # Extract hosts
+    hosts=$(kubectl get ingress "$ing_name" -n "$ns" -o jsonpath='{range .spec.rules[*]}{.host}{" "}{end}' 2>/dev/null)
+    tls=$(kubectl get ingress "$ing_name" -n "$ns" -o jsonpath='{.spec.tls}' 2>/dev/null)
+    scheme="http"
+    if [[ -n "$tls" && "$tls" != "null" ]]; then
+      scheme="https"
+    fi
+
+    if [[ -n "$hosts" ]]; then
+      urls=""
+      for host in $hosts; do
+        urls="$urls ${scheme}://${host}"
+      done
+    fi
+  done
+
+  [[ -z "$urls" ]] && urls="N/A"
 
   printf "| %-20s | %-30s | %-25s | %-42s | %-8s | %-8s | %-8s | %-8s |\n" \
-    "$ns" "$pod" "$ing" "$endpoint" "$cpu" "$memory" "$xms" "$xmx"
+    "$ns" "$pod" "$ingress_names" "$urls" "$cpu" "$memory" "$xms" "$xmx"
   echo "$SEP"
 done
