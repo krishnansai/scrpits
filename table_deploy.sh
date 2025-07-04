@@ -63,6 +63,6 @@ for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
   [[ -z "$urls" ]] && urls="N/A"
 
   printf "| %-20s | %-30s | %-25s | %-42s | %-8s | %-8s | %-8s | %-8s |\n" \
-    "$ns" "$pod" "$ingress_names" "$urls" "$cpu" "$memory" "$xms" "$xmx"
+    "$ns" "$pod" "$ingress_names" "$urls" "$cpu" "$memory" "$xms" "$xmx" >> data.csv
   echo "$SEP"
 done
