@@ -3,12 +3,24 @@
 SEP="+----------------------+--------------------------------+---------------------------+--------------------------------------------+----------+----------+----------+----------+"
 HEADER="| NAMESPACE            | POD                            | INGRESS                   | ENDPOINT URL                               | CPU      | MEMORY   | XMS      | XMX      |"
 
+# Output file
+OUTPUT="data.csv"
+
+# Write header to output file
+{
+  echo "$SEP"
+  echo "$HEADER"
+  echo "$SEP"
+} > "$OUTPUT"
+
+# Also print to console
 echo "$SEP"
 echo "$HEADER"
 echo "$SEP"
 
 # Loop all namespaces
 for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+  # Get pods
   pods=$(kubectl get pods -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
   pod=$(echo "$pods" | head -n1)
   if [[ -z "$pod" ]]; then
@@ -40,29 +52,34 @@ for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
 
   # Build URLs
   urls="N/A"
-  for ing_name in $ingress_names; do
-    if [[ "$ing_name" == "(none)" ]]; then
-      continue
-    fi
-    # Extract hosts
-    hosts=$(kubectl get ingress "$ing_name" -n "$ns" -o jsonpath='{range .spec.rules[*]}{.host}{" "}{end}' 2>/dev/null)
-    tls=$(kubectl get ingress "$ing_name" -n "$ns" -o jsonpath='{.spec.tls}' 2>/dev/null)
-    scheme="http"
-    if [[ -n "$tls" && "$tls" != "null" ]]; then
-      scheme="https"
-    fi
-
-    if [[ -n "$hosts" ]]; then
-      urls=""
+  if [[ "$ingress_names" != "(none)" ]]; then
+    urls=""
+    for ing_name in $ingress_names; do
+      hosts=$(kubectl get ingress "$ing_name" -n "$ns" -o jsonpath='{range .spec.rules[*]}{.host}{" "}{end}' 2>/dev/null)
+      tls=$(kubectl get ingress "$ing_name" -n "$ns" -o jsonpath='{.spec.tls}' 2>/dev/null)
+      scheme="http"
+      if [[ -n "$tls" && "$tls" != "null" ]]; then
+        scheme="https"
+      fi
       for host in $hosts; do
         urls="$urls ${scheme}://${host}"
       done
-    fi
-  done
+    done
+    [[ -z "$urls" ]] && urls="N/A"
+  fi
 
-  [[ -z "$urls" ]] && urls="N/A"
+  # Remove leading space in URLs
+  urls=$(echo "$urls" | sed 's/^ *//')
 
+  # Print to console
   printf "| %-20s | %-30s | %-25s | %-42s | %-8s | %-8s | %-8s | %-8s |\n" \
-    "$ns" "$pod" "$ingress_names" "$urls" "$cpu" "$memory" "$xms" "$xmx" >> data.csv
+    "$ns" "$pod" "$ingress_names" "$urls" "$cpu" "$memory" "$xms" "$xmx"
   echo "$SEP"
+
+  # Write to file
+  {
+    printf "| %-20s | %-30s | %-25s | %-42s | %-8s | %-8s | %-8s | %-8s |\n" \
+      "$ns" "$pod" "$ingress_names" "$urls" "$cpu" "$memory" "$xms" "$xmx"
+    echo "$SEP"
+  } >> "$OUTPUT"
 done
